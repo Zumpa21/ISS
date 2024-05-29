@@ -1,0 +1,135 @@
+System boundarybasicrobot24
+
+Event  sonardata   : sonar( DISTANCE ) 	   
+
+Request engage     : engage(OWNER, TIME)	
+Reply   engagedone    : engagedone(ARG)    for engage
+Reply   engagerefused : engagerefused(ARG) for engage
+
+Request step       : step(TIME)	
+Reply stepdone     : stepdone(V)                 for step
+Reply stepfailed   : stepfailed(DURATION, CAUSE) for step
+
+Dispatch setdirection : dir( D )
+
+Request getrobotstate : getrobotstate(ARG)
+Reply robotstate      : robotstate(POS,DIR)  for getrobotstate
+
+Dispatch end       	: end(ARG)
+
+Context ctxboundarybasicrobot ip [host="localhost" port=8088]
+Context ctxbasicrobot ip [host="127.0.0.1" port=8020]  
+
+ExternalQActor basicrobot context ctxbasicrobot
+
+QActor boundary context ctxboundarybasicrobot {
+	[# val OWNER = "$name";
+		var STEPSDONE = 0; 
+		var DIR = "down";
+		var xdone = 0;
+		var ydone = 0;	#]
+	State s0 initial {
+		println("$name starts") color red
+		
+		request basicrobot -m engage : engage($OWNER, 350)
+		
+		subscribeTo boundary for sonardata
+		
+		//request basicrobot -m step : step(350)
+	}
+	
+	Transition t0
+		whenReply engagedone -> handleEngageDone
+		whenReply engagerefused -> handleEngageRefused
+		
+	State handleEngageDone {
+		println("$name engage done") color green
+		
+		delay 100
+		
+		request basicrobot -m step : step(350)
+	}
+	
+	Transition t0
+		whenReply stepdone -> handleStepDone
+		
+	State handleStepDone {
+		[# STEPSDONE +=1 
+			if(DIR=="down") xdone += 1
+			else if(DIR=="up") xdone -= 1
+			if(DIR=="right") ydone += 1
+			else if(DIR=="left") ydone -= 1
+			#]
+				
+		discardMsg Off
+		
+		delay 100
+		request basicrobot -m step : step(350)
+	}
+	Transition t0
+		whenEvent   sonardata  -> handlesonardata
+		whenReply stepdone -> handleStepDone
+		//whenReply stepfailed -> checkPos
+		whenReply stepfailed -> handleStepFailed
+			
+		
+	State handlesonardata{ //non riceve l'evento
+    	onMsg( sonardata : sonar(D)){
+    		delay 500
+    	}  
+    }
+    Goto handleStepDone
+		
+	/*State checkPos {
+		request basicrobot -m getrobotstate : getrobotstate(robot)
+	}
+	Transition t0
+		whenReply robotstate -> getRobotState */
+	
+		
+	State handleStepFailed {
+		[#	if(DIR=="down") DIR="right";	
+			else if(DIR=="right") DIR="up";
+			else if(DIR=="up") DIR="left";
+			else if(DIR=="left") DIR="down";	#]
+		//println("$DIR direction, $xdone e $ydone") color blue
+		forward basicrobot -m setdirection : dir($DIR)
+		
+		if [# xdone == 0 && ydone == 0 #]{ 
+			println("$name end ..")  
+			println("perimeter = $STEPSDONE") color blue
+			forward basicrobot -m end : end(end)
+		}
+		
+		delay 500
+		request basicrobot -m step : step(350)
+
+	}
+	Transition t0
+		whenReply stepdone -> handleStepDone
+		whenReply stepfailed -> handleStepFailed
+		
+/*	State getRobotState {
+		onMsg(robotstate : robotstate(POS,DIR)) {
+			[#	var Pos = payloadArg(0)
+ 				DIR = payloadArg(1)
+ 				var X = 0
+ 				var Y = 0
+ 				val regex = """pos\((\d+),(\d+)\)""".toRegex()
+				val matchResult = regex.find(Pos)
+				if (matchResult != null) {
+				    val (yStr, xStr) = matchResult.destructured
+				    X = xStr.toInt()
+				    Y = yStr.toInt()
+ 				}else {
+				    CommUtils.outred("setstatemirabella Invalid input format")  
+				}	#]
+				println("$X $Y $Pos e $DIR") color blue
+		}
+	}
+	Goto handleStepFailed */
+	
+	State handleEngageRefused {
+		println("$name engage refused") color red
+	}
+}
